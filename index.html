@@ -404,6 +404,7 @@ transition: opacity 0.15s;
   </div>
 
 <button class="dexbtn" id="openDex">📖 OPEN CRITTERDEX <span class="count" id="dexCount">(0/7)</span></button>
+<button class="dexbtn" id="openLab">🧪 OPEN BIO LAB <span class="count" id="storageCount">(0)</span></button>
 
   <div class="dpad">
     <button class="up"    id="btnUp">▲</button>
@@ -427,6 +428,20 @@ transition: opacity 0.15s;
     <div class="modal-body">
       <div class="dex-progress">CAUGHT: <span class="gold" id="dexProgress">0 / 7</span></div>
       <div class="dex-grid" id="dexGrid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="labModal">
+  <div class="modal-inner">
+    <div class="modal-head">
+      <span>◆ BIO LAB ◆</span>
+      <button class="modal-close" id="closeLab">CLOSE</button>
+    </div>
+    <div class="modal-body">
+      <div class="dex-progress">STORED: <span class="gold" id="labStorageCount">0</span> • RELEASED: <span class="gold" id="labReleasedCount">0</span></div>
+      <div id="labList" style="display:grid; gap:8px;"></div>
+      <button class="dexbtn" id="releaseBtn" style="margin-top:8px;">RELEASE SELECTED</button>
     </div>
   </div>
 </div>
@@ -497,6 +512,9 @@ let catchBonus = 0; // baiting/rocks modify this
 let inBattle = false;
 const caught = new Set();
 let balls = 10;
+const storedCritters = [];
+const wildReleasedPool = [];
+let selectedStoredCritterId = null;
 
 // Ball pickups scattered on the map. Each respawns ~30s after collection.
 const PICKUP_SPOTS = [
@@ -532,6 +550,20 @@ function getSprite(name) {
   drawCritter(o, c, 0, 0);
   spriteCache[name] = off;
   return off;
+}
+
+function getSpriteForCritter(critter) {
+  if (critter && critter.spriteData) {
+    const off = document.createElement('canvas');
+    off.width = 32; off.height = 32;
+    const o = off.getContext('2d');
+    const img = new Image();
+    img.src = critter.spriteData;
+    if (img.complete) o.drawImage(img, 0, 0, 32, 32);
+    else img.onload = () => { if (inBattle && wild && wild.id === critter.id) flash(); };
+    return off;
+  }
+  return getSprite(critter.name);
 }
 
 // ============================================================
@@ -842,6 +874,9 @@ bindDpad('btnRight', 1,  0);
 // ============================================================
 
 function pickWild() {
+  if (wildReleasedPool.length > 0 && Math.random() < 0.25) {
+    return wildReleasedPool[Math.floor(Math.random() * wildReleasedPool.length)];
+  }
   // weighted by inverse rarity
   const weights = CRITTERS.map(c => 1 / c.rarity);
   const total = weights.reduce((a,b)=>a+b,0);
@@ -861,7 +896,7 @@ function startEncounter() {
   inBattle = true;
 
   // draw critter on canvas (overlay)
-  const sp = getSprite(wild.name);
+  const sp = getSpriteForCritter(wild);
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.fillRect(0,0,160,160);
   ctx.drawImage(sp, 64, 50);
@@ -894,6 +929,14 @@ function setMsg(text) {
 
 function updateBalls() { document.getElementById('balls').textContent = balls; }
 function updateCaught() { document.getElementById('caught').textContent = caught.size; }
+function updateStorageCounts() {
+  const el = document.getElementById('storageCount');
+  if (el) el.textContent = `(${storedCritters.length})`;
+  const labStored = document.getElementById('labStorageCount');
+  if (labStored) labStored.textContent = String(storedCritters.length);
+  const labReleased = document.getElementById('labReleasedCount');
+  if (labReleased) labReleased.textContent = String(wildReleasedPool.length);
+}
 
 function rarityStars(n) {
   return '★'.repeat(n) + '☆'.repeat(5 - n);
@@ -974,6 +1017,54 @@ if (dexModal) {
   });
 }
 
+function buildLabList() {
+  const list = document.getElementById('labList');
+  if (!list) return;
+  list.innerHTML = '';
+  for (const c of storedCritters) {
+    const row = document.createElement('label');
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
+    row.style.gap = '8px';
+    const cb = document.createElement('input');
+    cb.type = 'radio';
+    cb.name = 'labPick';
+    cb.checked = selectedStoredCritterId === c.id;
+    cb.disabled = !!c.nonReleasable;
+    cb.addEventListener('change', () => { selectedStoredCritterId = c.id; });
+    const text = document.createElement('span');
+    text.textContent = `${c.name} — ${c.desc}${c.nonReleasable ? ' (Protected)' : ''}`;
+    row.appendChild(cb);
+    row.appendChild(text);
+    list.appendChild(row);
+  }
+  if (!storedCritters.length) {
+    list.textContent = 'No critters in storage yet.';
+  }
+}
+
+const labModal = document.getElementById('labModal');
+const openLabBtn = document.getElementById('openLab');
+const closeLabBtn = document.getElementById('closeLab');
+if (openLabBtn) openLabBtn.addEventListener('click', () => { buildLabList(); updateStorageCounts(); labModal.classList.add('open'); });
+if (closeLabBtn) closeLabBtn.addEventListener('click', () => labModal.classList.remove('open'));
+if (labModal) labModal.addEventListener('click', e => { if (e.target === labModal) labModal.classList.remove('open'); });
+const releaseBtn = document.getElementById('releaseBtn');
+if (releaseBtn) releaseBtn.addEventListener('click', () => {
+  const idx = storedCritters.findIndex(c => c.id === selectedStoredCritterId);
+  if (idx < 0) { setMsg('Select a stored critter to release.'); return; }
+  const critter = storedCritters[idx];
+  if (critter.nonReleasable) { setMsg(`${critter.name} is protected and cannot be released.`); return; }
+  if (!confirm(`Release ${critter.name} back into the wild?`)) return;
+  storedCritters.splice(idx, 1);
+  wildReleasedPool.push(critter);
+  selectedStoredCritterId = null;
+  buildLabList();
+  updateStorageCounts();
+  updateDex();
+  setMsg(`${critter.name} was released. It may appear in the wild again!`);
+});
+
 // catch formula: lower HP + bait/rock bonus + rarity penalty
 function catchChance() {
   const hpFactor = 1 - (wildHP / wildHPMax) * 0.6; // 0.4 .. 1.0
@@ -991,6 +1082,16 @@ document.getElementById('actThrow').addEventListener('click', () => {
   flash();
   setTimeout(() => {
     if (Math.random() < chance) {
+      const customSprite = getSprite(wild.name).toDataURL('image/png');
+      storedCritters.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: wild.name,
+        desc: wild.desc,
+        rarity: wild.rarity,
+        spriteData: wild.spriteData || customSprite,
+        nonReleasable: !!wild.nonReleasable,
+      });
+      updateStorageCounts();
       setMsg(`Gotcha! ${wild.name} was caught!`);
       endBattle(true);
     } else {
@@ -1044,7 +1145,7 @@ function flash() {
       drawMap(); drawPlayer();
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(0,0,160,160);
-      ctx.drawImage(getSprite(wild.name), 64, 50);
+      ctx.drawImage(getSpriteForCritter(wild), 64, 50);
     }
   }, 120);
 }
@@ -1053,6 +1154,7 @@ function flash() {
 updateBalls();
 updateCaught();
 updateDex();
+updateStorageCounts();
 render();
 
 // keep the ball bob animated when not in battle
