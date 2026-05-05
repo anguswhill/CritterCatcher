@@ -546,7 +546,7 @@ const caught = new Set();
 let storedCritters = [];
 let selectedCritterId = null;
 let balls = 10;
-let parts = {};
+let parts = [];
 
 function saveProgress() {
   localStorage.setItem('cq_caught', JSON.stringify(Array.from(caught)));
@@ -558,15 +558,37 @@ function loadProgress() {
   try {
     const savedCaught = JSON.parse(localStorage.getItem('cq_caught') || '[]');
     if (Array.isArray(savedCaught)) savedCaught.forEach(name => caught.add(name));
+
     const savedStored = JSON.parse(localStorage.getItem('cq_storedCritters') || '[]');
     if (Array.isArray(savedStored)) {
-      storedCritters = savedStored.filter(c => c && c.id && c.species && c.spriteData);
+      storedCritters = savedStored
+        .filter(c => c && c.id && c.species && c.spriteData)
+        .map(c => ({
+          id: c.id,
+          species: c.species,
+          spriteData: c.spriteData,
+          stats: c.stats && typeof c.stats === 'object' ? c.stats : {},
+          partsUsed: Array.isArray(c.partsUsed) ? c.partsUsed : []
+        }));
     }
-    const savedParts = JSON.parse(localStorage.getItem('cq_parts') || '{}');
-    if (savedParts && typeof savedParts === 'object') parts = savedParts;
-    if (storedCritters.length > 0) selectedCritterId = storedCritters[0].id;
+
+    const savedPartsRaw = localStorage.getItem('cq_parts');
+    const savedParts = JSON.parse(savedPartsRaw || '[]');
+    if (Array.isArray(savedParts)) {
+      parts = savedParts;
+    } else if (savedParts && typeof savedParts === 'object') {
+      // Back-compat for older saves that stored parts as an object.
+      parts = Object.values(savedParts);
+    }
+
+    if (storedCritters.length > 0) {
+      selectedCritterId = storedCritters[0].id;
+    }
   } catch (err) {
     console.warn('Failed to load save data:', err);
+    storedCritters = [];
+    parts = [];
+    selectedCritterId = null;
   }
 }
 
@@ -1071,7 +1093,7 @@ function buildStorageGrid() {
 
     const btn = document.createElement('button');
     btn.className = 'storage-status';
-    btn.textContent = critter.id === selectedCritterId ? 'EDITING' : 'SELECT';
+    btn.textContent = critter.id === selectedCritterId ? 'EDITING' : 'EDIT';
     btn.addEventListener('click', () => {
       selectedCritterId = critter.id;
       buildStorageGrid();
