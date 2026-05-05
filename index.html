@@ -419,6 +419,17 @@ cursor: pointer;
 }
 .storage-empty { font-size: 20px; opacity: 0.8; }
 
+
+.sprite-editor { margin-top: 12px; border: 2px solid var(--ink); padding: 10px; background: rgba(255,255,255,0.08); }
+.sprite-editor-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.sprite-editor-title { font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--accent); }
+.sprite-editor-id { font-size: 12px; opacity: .8; }
+.sprite-editor-canvas { width: 192px; height: 192px; image-rendering: pixelated; border: 2px solid var(--ink); background:#fff; touch-action:none; }
+.sprite-editor-tools { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.swatch { width:24px; height:24px; border:2px solid var(--ink); cursor:pointer; }
+.swatch.active { outline:2px solid var(--accent); }
+.sprite-editor-note { font-size: 12px; margin-top: 6px; opacity: 0.8; }
+
 /* Catch animation overlay */
 .flash {
 position: absolute;
@@ -505,6 +516,15 @@ transition: opacity 0.15s;
         <span id="storageCount">0 STORED</span>
       </div>
       <div class="storage-grid" id="storageGrid"></div>
+      <div class="sprite-editor" id="spriteEditor" style="display:none;">
+        <div class="sprite-editor-head">
+          <span class="sprite-editor-title">◆ SPRITE EDITOR ◆</span>
+          <span class="sprite-editor-id" id="editorCritterLabel"></span>
+        </div>
+        <canvas id="editorCanvas" class="sprite-editor-canvas" width="32" height="32"></canvas>
+        <div class="sprite-editor-tools" id="editorSwatches"></div>
+        <div class="sprite-editor-note">Tap/drag to paint. Changes save instantly.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1130,6 +1150,8 @@ function openLab() {
   labOpen = true;
   document.getElementById('labModal').classList.add('open');
   buildStorageGrid();
+  bindSpriteEditor();
+  drawSpriteEditor();
   setMsg('You entered the lab. Wild critters are kept outside.');
 }
 
@@ -1237,6 +1259,71 @@ function buildDexGrid() {
   }
 }
 
+
+const EDITOR_PALETTE = ['#000000','#ffffff','#ff5a3c','#5ec6ff','#74d86c','#f6d98b','#7f7f8f','#2b2150'];
+let editorColor = EDITOR_PALETTE[0];
+
+function getSelectedCritter() {
+  return storedCritters.find(c => c.id === selectedCritterId) || null;
+}
+
+function buildEditorSwatches() {
+  const sw = document.getElementById('editorSwatches');
+  if (!sw) return;
+  sw.innerHTML = '';
+  for (const color of EDITOR_PALETTE) {
+    const b = document.createElement('button');
+    b.className = 'swatch' + (color === editorColor ? ' active' : '');
+    b.style.background = color;
+    b.type = 'button';
+    b.addEventListener('click', () => { editorColor = color; buildEditorSwatches(); });
+    sw.appendChild(b);
+  }
+}
+
+function drawSpriteEditor() {
+  const wrap = document.getElementById('spriteEditor');
+  const label = document.getElementById('editorCritterLabel');
+  const cv = document.getElementById('editorCanvas');
+  if (!wrap || !label || !cv) return;
+  const critter = getSelectedCritter();
+  if (!critter) { wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  label.textContent = critter.species;
+  const cx = cv.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    cx.clearRect(0,0,32,32);
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(img, 0, 0, 32, 32);
+  };
+  img.src = critter.spriteData;
+  buildEditorSwatches();
+}
+
+function bindSpriteEditor() {
+  const cv = document.getElementById('editorCanvas');
+  if (!cv || cv.dataset.bound === '1') return;
+  cv.dataset.bound = '1';
+  const paint = evt => {
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor(((evt.touches ? evt.touches[0].clientX : evt.clientX) - r.left) * 32 / r.width);
+    const y = Math.floor(((evt.touches ? evt.touches[0].clientY : evt.clientY) - r.top) * 32 / r.height);
+    if (x < 0 || y < 0 || x > 31 || y > 31) return;
+    const cx = cv.getContext('2d');
+    cx.fillStyle = editorColor;
+    cx.fillRect(x,y,1,1);
+    const critter = getSelectedCritter();
+    if (critter) { critter.spriteData = cv.toDataURL(); saveProgress(); buildStorageGrid(); }
+  };
+  let down=false;
+  cv.addEventListener('pointerdown', e => { down=true; paint(e); });
+  window.addEventListener('pointerup', () => down=false);
+  cv.addEventListener('pointermove', e => { if (down) paint(e); });
+  cv.addEventListener('touchstart', e => { e.preventDefault(); paint(e); }, {passive:false});
+  cv.addEventListener('touchmove', e => { e.preventDefault(); paint(e); }, {passive:false});
+}
+
 function buildStorageGrid() {
   const grid = document.getElementById('storageGrid');
   const count = document.getElementById('storageCount');
@@ -1279,6 +1366,7 @@ function buildStorageGrid() {
     btn.addEventListener('click', () => {
       selectedCritterId = critter.id;
       buildStorageGrid();
+      drawSpriteEditor();
       saveProgress();
     });
 
@@ -1299,6 +1387,7 @@ if (openDexBtn) {
       updateDex();
       buildDexGrid();
       buildStorageGrid();
+      drawSpriteEditor();
       dexModal.classList.add('open');
     } catch (err) {
       alert('Dex error: ' + err.message);
