@@ -424,7 +424,12 @@ cursor: pointer;
 .sprite-editor-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 .sprite-editor-title { font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--accent); }
 .sprite-editor-id { font-size: 12px; opacity: .8; }
-.sprite-editor-canvas { width: 192px; height: 192px; image-rendering: pixelated; border: 2px solid var(--ink); background:#fff; touch-action:none; }
+.sprite-editor-canvas { width: min(192px, 100%); height: auto; aspect-ratio: 1 / 1; image-rendering: pixelated; border: 2px solid var(--ink); background:#fff; touch-action:none; }
+.sprite-editor-layout { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start; }
+.sprite-editor-side { flex:1 1 220px; min-width: 180px; }
+.palette-block { margin-bottom:8px; }
+.palette-title { font-family:'Press Start 2P', monospace; font-size:7px; color: var(--cream); margin-bottom:4px; display:flex; justify-content:space-between; }
+.sprite-editor-status { font-size:12px; line-height:1.3; margin-top:6px; }
 .sprite-editor-tools { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .swatch { width:24px; height:24px; border:2px solid var(--ink); cursor:pointer; }
 .swatch.active { outline:2px solid var(--accent); }
@@ -521,9 +526,14 @@ transition: opacity 0.15s;
           <span class="sprite-editor-title">◆ SPRITE EDITOR ◆</span>
           <span class="sprite-editor-id" id="editorCritterLabel"></span>
         </div>
-        <canvas id="editorCanvas" class="sprite-editor-canvas" width="32" height="32"></canvas>
-        <div class="sprite-editor-tools" id="editorSwatches"></div>
-        <div class="sprite-editor-note">Tap/drag to paint. Changes save instantly.</div>
+        <div class="sprite-editor-layout">
+          <canvas id="editorCanvas" class="sprite-editor-canvas" width="32" height="32"></canvas>
+          <div class="sprite-editor-side">
+            <div id="editorSwatches"></div>
+            <div class="sprite-editor-status" id="editorPartStatus"></div>
+            <div class="sprite-editor-note">Tap/drag to paint. Part palettes consume part pixels (10 per part). Changes save instantly.</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1260,8 +1270,44 @@ function buildDexGrid() {
 }
 
 
-const EDITOR_PALETTE = ['#000000','#ffffff','#ff5a3c','#5ec6ff','#74d86c','#f6d98b','#7f7f8f','#2b2150'];
-let editorColor = EDITOR_PALETTE[0];
+const PALETTE_GROUPS = [
+  { key:'base', label:'BASE', colors:['#000000','#ffffff','#ff5a3c','#5ec6ff','#74d86c','#f6d98b','#7f7f8f','#2b2150'], partKey:null },
+  { key:'biomatter', label:'BIOMATTER', colors:['#38b764','#257179','#9badb7'], partKey:'biomatter' },
+  { key:'shell', label:'SHELL ICONS', colors:['#e06f8b','#8f563b','#f9c22e'], partKey:'shell' },
+  { key:'spark', label:'GLITTER / GLOW', colors:['#41a6f6','#73eff7','#ff77a8'], partKey:'spark' }
+];
+const PIXELS_PER_PART = 10;
+let editorColor = PALETTE_GROUPS[0].colors[0];
+
+
+function getColorGroup(color) {
+  for (const group of PALETTE_GROUPS) {
+    if (group.colors.includes(color)) return group;
+  }
+  return PALETTE_GROUPS[0];
+}
+
+function recalcPartUsage(critter, imageData) {
+  const usage = { biomatter: 0, shell: 0, spark: 0 };
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const hex = '#' + [d[i], d[i+1], d[i+2]].map(v => v.toString(16).padStart(2,'0')).join('');
+    const group = getColorGroup(hex);
+    if (group.partKey) usage[group.partKey] += 1;
+  }
+  critter.partsUsed = usage;
+}
+
+function renderPartStatus(critter) {
+  const el = document.getElementById('editorPartStatus');
+  if (!el || !critter) return;
+  const lines = ['biomatter','shell','spark'].map(part => {
+    const used = (critter.partsUsed && critter.partsUsed[part]) || 0;
+    const max = (parts[part] || 0) * PIXELS_PER_PART;
+    return `${part.toUpperCase()}: ${used}/${max} px`;
+  });
+  el.innerHTML = lines.join('<br>');
+}
 
 function getSelectedCritter() {
   return storedCritters.find(c => c.id === selectedCritterId) || null;
@@ -1271,13 +1317,26 @@ function buildEditorSwatches() {
   const sw = document.getElementById('editorSwatches');
   if (!sw) return;
   sw.innerHTML = '';
-  for (const color of EDITOR_PALETTE) {
-    const b = document.createElement('button');
-    b.className = 'swatch' + (color === editorColor ? ' active' : '');
-    b.style.background = color;
-    b.type = 'button';
-    b.addEventListener('click', () => { editorColor = color; buildEditorSwatches(); });
-    sw.appendChild(b);
+  for (const group of PALETTE_GROUPS) {
+    const block = document.createElement('div');
+    block.className = 'palette-block';
+    const title = document.createElement('div');
+    title.className = 'palette-title';
+    const avail = group.partKey ? `${parts[group.partKey] * PIXELS_PER_PART} px` : 'FREE';
+    title.innerHTML = `<span>${group.label}</span><span>${avail}</span>`;
+    block.appendChild(title);
+    const row = document.createElement('div');
+    row.className = 'sprite-editor-tools';
+    for (const color of group.colors) {
+      const b = document.createElement('button');
+      b.className = 'swatch' + (color === editorColor ? ' active' : '');
+      b.style.background = color;
+      b.type = 'button';
+      b.addEventListener('click', () => { editorColor = color; buildEditorSwatches(); });
+      row.appendChild(b);
+    }
+    block.appendChild(row);
+    sw.appendChild(block);
   }
 }
 
@@ -1296,6 +1355,8 @@ function drawSpriteEditor() {
     cx.clearRect(0,0,32,32);
     cx.imageSmoothingEnabled = false;
     cx.drawImage(img, 0, 0, 32, 32);
+    recalcPartUsage(critter, cx.getImageData(0,0,32,32));
+    renderPartStatus(critter);
   };
   img.src = critter.spriteData;
   buildEditorSwatches();
@@ -1311,10 +1372,19 @@ function bindSpriteEditor() {
     const y = Math.floor(((evt.touches ? evt.touches[0].clientY : evt.clientY) - r.top) * 32 / r.height);
     if (x < 0 || y < 0 || x > 31 || y > 31) return;
     const cx = cv.getContext('2d');
+    const critter = getSelectedCritter();
+    if (!critter) return;
+    const group = getColorGroup(editorColor);
+    if (group.partKey) {
+      const current = (critter.partsUsed && critter.partsUsed[group.partKey]) || 0;
+      const max = (parts[group.partKey] || 0) * PIXELS_PER_PART;
+      if (current >= max) return;
+    }
     cx.fillStyle = editorColor;
     cx.fillRect(x,y,1,1);
-    const critter = getSelectedCritter();
-    if (critter) { critter.spriteData = cv.toDataURL(); saveProgress(); buildStorageGrid(); }
+    recalcPartUsage(critter, cx.getImageData(0,0,32,32));
+    renderPartStatus(critter);
+    critter.spriteData = cv.toDataURL(); saveProgress(); buildStorageGrid();
   };
   let down=false;
   cv.addEventListener('pointerdown', e => { down=true; paint(e); });
