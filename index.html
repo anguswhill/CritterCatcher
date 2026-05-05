@@ -1137,7 +1137,7 @@ function endBattle(result = 'escaped') {
     const instance = {
       id: `crt_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
       species: wild.name,
-      spriteData: getDisplaySpriteSource(wild.name).toDataURL(),
+      spriteData: getDisplaySpriteDataURL(wild.name),
       stats: { rarity: wild.rarity, caughtAt: new Date().toISOString() },
       partsUsed: []
     };
@@ -1321,9 +1321,35 @@ function getLatestCustomCritterForSpecies(species) {
   return null;
 }
 
+const customSpriteImageCache = new Map();
+
+function getCustomSpriteImage(spriteData) {
+  if (!spriteData || typeof spriteData !== 'string') return null;
+  let entry = customSpriteImageCache.get(spriteData);
+  if (!entry) {
+    const img = new Image();
+    entry = { img, loaded: false };
+    img.onload = () => { entry.loaded = true; };
+    img.onerror = () => {
+      customSpriteImageCache.delete(spriteData);
+      entry.loaded = false;
+    };
+    img.src = spriteData;
+    customSpriteImageCache.set(spriteData, entry);
+  }
+  return entry.loaded ? entry.img : null;
+}
+
 function getDisplaySpriteSource(species) {
   const custom = getLatestCustomCritterForSpecies(species);
-  return custom ? custom.spriteData : getSprite(species);
+  if (!custom) return getSprite(species);
+  return getCustomSpriteImage(custom.spriteData) || getSprite(species);
+}
+
+function getDisplaySpriteDataURL(species) {
+  const custom = getLatestCustomCritterForSpecies(species);
+  if (custom && custom.spriteData) return custom.spriteData;
+  return getSprite(species).toDataURL();
 }
 
 function buildEditorSwatches() {
