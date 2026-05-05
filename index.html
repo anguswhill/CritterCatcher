@@ -1113,7 +1113,7 @@ function startEncounter() {
   inBattle = true;
 
   // draw critter on canvas (overlay)
-  const sp = getSprite(wild.name);
+  const sp = getDisplaySpriteSource(wild.name);
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.fillRect(0,0,160,160);
   ctx.drawImage(sp, 64, 50);
@@ -1137,7 +1137,7 @@ function endBattle(result = 'escaped') {
     const instance = {
       id: `crt_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
       species: wild.name,
-      spriteData: getSprite(wild.name).toDataURL(),
+      spriteData: getDisplaySpriteSource(wild.name).toDataURL(),
       stats: { rarity: wild.rarity, caughtAt: new Date().toISOString() },
       partsUsed: []
     };
@@ -1244,7 +1244,7 @@ function buildDexGrid() {
     const sctx = sp.getContext('2d');
     if (sctx) {
       sctx.imageSmoothingEnabled = false;
-      sctx.drawImage(getSprite(c.name), 0, 0, 32, 32, 0, 0, 64, 64);
+      sctx.drawImage(getDisplaySpriteSource(c.name), 0, 0, 32, 32, 0, 0, 64, 64);
     }
 
     const info = document.createElement('div');
@@ -1271,7 +1271,7 @@ function buildDexGrid() {
 
 
 const PALETTE_GROUPS = [
-  { key:'base', label:'BASE', colors:['#000000','#ffffff','#ff5a3c','#5ec6ff','#74d86c','#f6d98b','#7f7f8f','#2b2150'], partKey:null },
+  { key:'base', label:'BASE', colors:['#000000','#ffffff'], partKey:null },
   { key:'biomatter', label:'BIOMATTER', colors:['#38b764','#257179','#9badb7'], partKey:'biomatter' },
   { key:'shell', label:'SHELL ICONS', colors:['#e06f8b','#8f563b','#f9c22e'], partKey:'shell' },
   { key:'spark', label:'GLITTER / GLOW', colors:['#41a6f6','#73eff7','#ff77a8'], partKey:'spark' }
@@ -1311,6 +1311,19 @@ function renderPartStatus(critter) {
 
 function getSelectedCritter() {
   return storedCritters.find(c => c.id === selectedCritterId) || null;
+}
+
+function getLatestCustomCritterForSpecies(species) {
+  for (let i = storedCritters.length - 1; i >= 0; i--) {
+    const critter = storedCritters[i];
+    if (critter && critter.species === species && critter.spriteData) return critter;
+  }
+  return null;
+}
+
+function getDisplaySpriteSource(species) {
+  const custom = getLatestCustomCritterForSpecies(species);
+  return custom ? custom.spriteData : getSprite(species);
 }
 
 function buildEditorSwatches() {
@@ -1374,17 +1387,35 @@ function bindSpriteEditor() {
     const cx = cv.getContext('2d');
     const critter = getSelectedCritter();
     if (!critter) return;
+    const baseSprite = getSprite(critter.species);
+    const baseCtx = baseSprite.getContext('2d');
+    if (!baseCtx) return;
+    const basePx = baseCtx.getImageData(x, y, 1, 1).data;
+    const baseAlpha = basePx[3];
+    if (editorColor !== '#ffffff' && baseAlpha !== 0) return;
     const group = getColorGroup(editorColor);
     if (group.partKey) {
       const current = (critter.partsUsed && critter.partsUsed[group.partKey]) || 0;
       const max = (parts[group.partKey] || 0) * PIXELS_PER_PART;
       if (current >= max) return;
     }
-    cx.fillStyle = editorColor;
-    cx.fillRect(x,y,1,1);
+    if (editorColor === '#ffffff') {
+      if (baseAlpha === 0) {
+        cx.clearRect(x,y,1,1);
+      } else {
+        cx.fillStyle = `rgba(${basePx[0]},${basePx[1]},${basePx[2]},${baseAlpha/255})`;
+        cx.fillRect(x,y,1,1);
+      }
+    } else {
+      cx.fillStyle = editorColor;
+      cx.fillRect(x,y,1,1);
+    }
     recalcPartUsage(critter, cx.getImageData(0,0,32,32));
     renderPartStatus(critter);
-    critter.spriteData = cv.toDataURL(); saveProgress(); buildStorageGrid();
+    critter.spriteData = cv.toDataURL();
+    saveProgress();
+    buildStorageGrid();
+    if (document.getElementById('dexModal')?.classList.contains('open')) buildDexGrid();
   };
   let down=false;
   cv.addEventListener('pointerdown', e => { down=true; paint(e); });
@@ -1562,7 +1593,7 @@ function flash() {
       drawMap(); drawPlayer();
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(0,0,160,160);
-      ctx.drawImage(getSprite(wild.name), 64, 50);
+      ctx.drawImage(getDisplaySpriteSource(wild.name), 64, 50);
     }
   }, 120);
 }
