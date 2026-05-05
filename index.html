@@ -435,6 +435,35 @@ cursor: pointer;
 .swatch.active { outline:2px solid var(--accent); }
 .sprite-editor-note { font-size: 12px; margin-top: 6px; opacity: 0.8; }
 
+
+.audio-controls {
+margin-top: 10px;
+display: flex;
+align-items: center;
+gap: 8px;
+background: var(--ink);
+border: 2px solid var(--cream);
+padding: 8px;
+}
+.audio-btn {
+font-family: 'Press Start 2P', monospace;
+font-size: 8px;
+letter-spacing: 1px;
+background: var(--accent);
+color: var(--cream);
+border: 2px solid var(--cream);
+padding: 8px 10px;
+cursor: pointer;
+}
+.audio-slider { flex: 1; accent-color: var(--gold); }
+.audio-label {
+font-family: 'Press Start 2P', monospace;
+font-size: 7px;
+color: var(--gold);
+min-width: 64px;
+text-align: right;
+}
+
 /* Catch animation overlay */
 .flash {
 position: absolute;
@@ -466,6 +495,13 @@ transition: opacity 0.15s;
   </div>
 
   <div class="msgbox" id="msg">Welcome! Walk into tall grass to find wild critters. Use arrow keys or WASD.</div>
+
+  <div class="audio-controls">
+    <button class="audio-btn" id="audioToggle" aria-label="Toggle audio">🔊 SOUND ON</button>
+    <input class="audio-slider" id="audioVolume" type="range" min="0" max="100" step="1" value="70" aria-label="Audio volume" />
+    <span class="audio-label" id="audioPct">70%</span>
+  </div>
+
 
   <div class="battle" id="battle">
     <h3 id="battleName">A wild critter appeared!</h3>
@@ -613,19 +649,25 @@ let balls = 10;
 const DEFAULT_PARTS = { biomatter: 0, shell: 0, spark: 0, gloom: 0 };
 let parts = { ...DEFAULT_PARTS };
 
-const audioState = { ctx: null, musicGain: null, sfxGain: null, started: false, lastStepAt: 0, lastCritterAt: 0 };
+const audioState = { ctx: null, masterGain: null, musicGain: null, sfxGain: null, started: false, muted: false, volume: 0.7, lastStepAt: 0, lastCritterAt: 0 };
+const audioToggleBtn = document.getElementById('audioToggle');
+const audioVolumeInput = document.getElementById('audioVolume');
+const audioPct = document.getElementById('audioPct');
 
 function ensureAudio() {
   if (!audioState.ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     audioState.ctx = new AC();
+    audioState.masterGain = audioState.ctx.createGain();
     audioState.musicGain = audioState.ctx.createGain();
     audioState.sfxGain = audioState.ctx.createGain();
     audioState.musicGain.gain.value = 0.05;
     audioState.sfxGain.gain.value = 0.09;
-    audioState.musicGain.connect(audioState.ctx.destination);
-    audioState.sfxGain.connect(audioState.ctx.destination);
+    audioState.masterGain.gain.value = audioState.muted ? 0 : audioState.volume;
+    audioState.musicGain.connect(audioState.masterGain);
+    audioState.sfxGain.connect(audioState.masterGain);
+    audioState.masterGain.connect(audioState.ctx.destination);
   }
   if (audioState.ctx.state === 'suspended') audioState.ctx.resume();
   if (!audioState.started) {
@@ -686,8 +728,50 @@ function playCritterNoise(){
   setTimeout(() => tone(f * 1.2, 0.05, 'square', 0.03), 60);
 }
 
+
+function applyAudioUi() {
+  const muted = audioState.muted || audioState.volume <= 0;
+  audioToggleBtn.textContent = muted ? '🔇 SOUND OFF' : '🔊 SOUND ON';
+  audioPct.textContent = `${Math.round(audioState.volume * 100)}%`;
+}
+
+function setVolume(raw) {
+  const next = Math.max(0, Math.min(1, raw));
+  audioState.volume = next;
+  if (audioState.masterGain && !audioState.muted) audioState.masterGain.gain.value = next;
+  localStorage.setItem('cq_volume', String(next));
+  applyAudioUi();
+}
+
+function setMuted(nextMuted) {
+  audioState.muted = !!nextMuted;
+  if (audioState.masterGain) audioState.masterGain.gain.value = audioState.muted ? 0 : audioState.volume;
+  localStorage.setItem('cq_muted', audioState.muted ? '1' : '0');
+  applyAudioUi();
+}
+
+function initAudioPrefs() {
+  const savedVol = parseFloat(localStorage.getItem('cq_volume') || '0.7');
+  const savedMuted = localStorage.getItem('cq_muted') === '1';
+  if (!Number.isNaN(savedVol)) audioState.volume = Math.max(0, Math.min(1, savedVol));
+  audioState.muted = savedMuted;
+  audioVolumeInput.value = String(Math.round(audioState.volume * 100));
+  applyAudioUi();
+
+  audioVolumeInput.addEventListener('input', () => {
+    ensureAudio();
+    setVolume(Number(audioVolumeInput.value) / 100);
+    if (audioState.volume > 0 && audioState.muted) setMuted(false);
+  });
+
+  audioToggleBtn.addEventListener('click', () => {
+    ensureAudio();
+    setMuted(!audioState.muted);
+  });
+}
+
 ['pointerdown','touchstart','keydown'].forEach(evt => {
-  window.addEventListener(evt, ensureAudio, { once: true });
+  window.addEventListener(evt, ensureAudio, { passive: true });
 });
 
 function saveProgress() {
@@ -1717,6 +1801,7 @@ function flash() {
 
 // init
 loadProgress();
+initAudioPrefs();
 updateBalls();
 updateCaught();
 updateParts();
